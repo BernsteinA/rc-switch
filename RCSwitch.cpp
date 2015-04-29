@@ -34,7 +34,7 @@ unsigned long RCSwitch::nReceivedValue = NULL;
 unsigned int RCSwitch::nReceivedBitlength = 0;
 unsigned int RCSwitch::nReceivedDelay = 0;
 unsigned int RCSwitch::nReceivedProtocol = 0;
-int RCSwitch::nReceiveTolerance = 60;
+int RCSwitch::nReceiveTolerance = 100;
 #endif
 unsigned int RCSwitch::timings[RCSWITCH_MAX_CHANGES];
 
@@ -45,7 +45,7 @@ RCSwitch::RCSwitch() {
   this->setProtocol(1);
   #if not defined( RCSwitchDisableReceiving )
   this->nReceiverInterrupt = -1;
-  this->setReceiveTolerance(60);
+  this->setReceiveTolerance(100);
   RCSwitch::nReceivedValue = NULL;
   #endif
 }
@@ -643,8 +643,8 @@ bool RCSwitch::receiveProtocol1(unsigned int changeCount){
     
       unsigned long code = 0;
       unsigned long delay = RCSwitch::timings[0] / 31;
-      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;    
-
+      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;
+    
       for (int i = 1; i<changeCount ; i=i+2) {
       
           if (RCSwitch::timings[i] > delay-delayTolerance && RCSwitch::timings[i] < delay+delayTolerance && RCSwitch::timings[i+1] > delay*3-delayTolerance && RCSwitch::timings[i+1] < delay*3+delayTolerance) {
@@ -668,7 +668,7 @@ bool RCSwitch::receiveProtocol1(unsigned int changeCount){
 
     if (code == 0){
         return false;
-    }else if (code != 0){
+    } else if (code != 0){
         return true;
     }
     
@@ -679,8 +679,8 @@ bool RCSwitch::receiveProtocol2(unsigned int changeCount){
     
       unsigned long code = 0;
       unsigned long delay = RCSwitch::timings[0] / 10;
-      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;    
-
+      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;
+    
       for (int i = 1; i<changeCount ; i=i+2) {
       
           if (RCSwitch::timings[i] > delay-delayTolerance && RCSwitch::timings[i] < delay+delayTolerance && RCSwitch::timings[i+1] > delay*2-delayTolerance && RCSwitch::timings[i+1] < delay*2+delayTolerance) {
@@ -717,8 +717,8 @@ bool RCSwitch::receiveProtocol3(unsigned int changeCount){
     
       unsigned long code = 0;
       unsigned long delay = RCSwitch::timings[0] / PROTOCOL3_SYNC_FACTOR;
-      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;    
-
+      unsigned long delayTolerance = delay * RCSwitch::nReceiveTolerance * 0.01;
+    
       for (int i = 1; i<changeCount ; i=i+2) {
       
           if  (RCSwitch::timings[i]   > delay*PROTOCOL3_0_HIGH_CYCLES - delayTolerance
@@ -759,15 +759,16 @@ void RCSwitch::handleInterrupt() {
   static unsigned int changeCount;
   static unsigned long lastTime;
   static unsigned int repeatCount;
-  
 
   long time = micros();
   duration = time - lastTime;
  
   if (duration > 5000 && duration > RCSwitch::timings[0] - 200 && duration < RCSwitch::timings[0] + 200) {
+    // end of a message.
     repeatCount++;
     changeCount--;
-    if (repeatCount == 2) {
+    if(repeatCount==1) { // which is always
+      
       if (receiveProtocol1(changeCount) == false){
         if (receiveProtocol2(changeCount) == false){
           if (receiveProtocol3(changeCount) == false){
@@ -775,17 +776,24 @@ void RCSwitch::handleInterrupt() {
           }
         }
       }
-      repeatCount = 0;
+        repeatCount = 0;
     }
-    changeCount = 0;
-  } else if (duration > 5000) {
-    changeCount = 0;
+    changeCount = 0; // reset the buffer
+  } else if (duration > 5000) { // beginning of a message or end of an incomplete message
+      receiveProtocol1(changeCount); // try to process what we have so far
+      changeCount = 0; // reset the buffer
   }
  
-  if (changeCount >= RCSWITCH_MAX_CHANGES) {
-    changeCount = 0;
-    repeatCount = 0;
+  if (changeCount >= RCSWITCH_MAX_CHANGES) { // got something but buffer full
+      // TODO: inefficient
+      // shift the buffer left
+      for ( int i = 0; i > RCSWITCH_MAX_CHANGES-2; i++)
+      {
+          RCSwitch::timings[i] = RCSwitch::timings[i+1];
+      }
+      changeCount--;
   }
+
   RCSwitch::timings[changeCount++] = duration;
   lastTime = time;  
 }
